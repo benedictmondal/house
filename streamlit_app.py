@@ -31,6 +31,19 @@ def project_investment_balances(initial_capital, monthly_contributions, annual_r
     return balances
 
 
+def generate_inflated_rent_series(initial_rent: float, annual_increase_percent: float, months: int):
+    """Return a month-by-month rent series that grows with inflation."""
+    if months <= 0:
+        return []
+    monthly_growth = (1.0 + annual_increase_percent / 100.0) ** (1.0 / 12.0) - 1.0
+    rent = initial_rent
+    series = []
+    for _ in range(months):
+        series.append(rent)
+        rent *= 1.0 + monthly_growth
+    return series
+
+
 def main() -> None:
     st.set_page_config(page_title="House Equity Projection", layout="wide")
     st.title("House Equity and Value Projection")
@@ -40,7 +53,7 @@ def main() -> None:
         "Compare those cash flows with investing the same upfront capital and monthly cost difference."
     )
 
-    scenario, rent_amount = collect_inputs()
+    scenario, rent_initial, rent_inflation = collect_inputs()
     if scenario is None:
         st.stop()
 
@@ -60,7 +73,8 @@ def main() -> None:
         monthly_df=monthly_df,
         scenario=scenario,
         investment_return=investment_return,
-        rent_amount=rent_amount,
+        rent_initial=rent_initial,
+        rent_inflation=rent_inflation,
     )
     yearly_df = pd.DataFrame(summarize_by_year(snapshots))
 
@@ -124,12 +138,20 @@ def collect_inputs():
         )
         down_payment_percent = None
 
-    rent_amount = st.sidebar.number_input(
-        "Monthly rent assumption ($)",
+    rent_initial = st.sidebar.number_input(
+        "Monthly rent (initial $)",
         min_value=0.0,
         max_value=20_000.0,
         value=4_000.0,
         step=100.0,
+        format="%.2f",
+    )
+    rent_inflation = st.sidebar.number_input(
+        "Rent annual increase (%)",
+        min_value=0.0,
+        max_value=15.0,
+        value=3.0,
+        step=0.25,
         format="%.2f",
     )
 
@@ -231,9 +253,9 @@ def collect_inputs():
         )
     except ValueError as exc:
         st.error(f"Input error: {exc}")
-        return None, None
+        return None, None, None
 
-    return scenario, rent_amount
+    return scenario, rent_initial, rent_inflation
 
 
 def build_monthly_dataframe(snapshots):
@@ -257,8 +279,14 @@ def build_monthly_dataframe(snapshots):
     return df
 
 
-def add_investment_projection(monthly_df, scenario, investment_return, rent_amount):
-    contributions = monthly_df["Total Outlay"] - rent_amount
+def add_investment_projection(monthly_df, scenario, investment_return, rent_initial, rent_inflation):
+    months = len(monthly_df)
+    rent_series = pd.Series(
+        generate_inflated_rent_series(rent_initial, rent_inflation, months),
+        index=monthly_df.index,
+        dtype=float,
+    )
+    contributions = monthly_df["Total Outlay"] - rent_series
     balances = project_investment_balances(
         initial_capital=scenario.initial_cash_outlay,
         monthly_contributions=contributions.tolist(),
@@ -266,6 +294,7 @@ def add_investment_projection(monthly_df, scenario, investment_return, rent_amou
     )
     monthly_df["Investment Contribution"] = contributions
     monthly_df["Investment Balance"] = balances
+    monthly_df["Comparable Rent"] = rent_series
     return monthly_df
 
 
@@ -279,6 +308,7 @@ def render_key_metrics(monthly_df: pd.DataFrame, scenario, investment_return: fl
 
     investment_final = final_row["Investment Balance"]
     home_value_final = final_row["Home Value"]
+    final_rent = monthly_df["Comparable Rent"].iloc[-1] if "Comparable Rent" in monthly_df.columns else None
 
     col_a, col_b, col_c, col_d, col_e = st.columns(5)
     col_a.metric("Loan amount", format_currency(scenario.loan_amount))
@@ -292,7 +322,8 @@ def render_key_metrics(monthly_df: pd.DataFrame, scenario, investment_return: fl
         f"Investment balance ({investment_return:.0f}%)",
         format_currency(investment_final),
     )
-    st.caption(f"Final home value: {format_currency(home_value_final)}")
+    rent_text = f" | Monthly rent (inflation-adjusted): {format_currency(final_rent)}" if final_rent is not None else ""
+    st.caption(f"Final home value: {format_currency(home_value_final)}{rent_text}")
 
 
 def render_plot(monthly_df: pd.DataFrame) -> None:
