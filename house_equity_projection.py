@@ -36,8 +36,11 @@ class MortgageScenario:
     purchase_price: float
     down_payment: float
     closing_costs: float
-    loan_term_years: int
+    points: float
+    points_cost: float
     annual_interest_rate: float
+    effective_interest_rate: float
+    loan_term_years: int
     annual_appreciation_rate: float
     annual_property_tax_rate: float
     annual_pmi_rate: float
@@ -54,11 +57,11 @@ class MortgageScenario:
 
     @property
     def initial_cash_outlay(self) -> float:
-        return self.down_payment + self.closing_costs
+        return self.down_payment + self.closing_costs + self.points_cost
 
     @property
     def monthly_interest_rate(self) -> float:
-        return self.annual_interest_rate / 12.0
+        return self.effective_interest_rate / 12.0
 
     @property
     def monthly_appreciation_rate(self) -> float:
@@ -132,7 +135,7 @@ def project_scenario(inputs: MortgageScenario) -> List[MonthlySnapshot]:
     home_value = inputs.purchase_price
     monthly_pi_payment = compute_monthly_payment(
         principal=loan_balance,
-        annual_rate=inputs.annual_interest_rate,
+        annual_rate=inputs.effective_interest_rate,
         term_months=inputs.loan_term_months,
     )
     monthly_appreciation = inputs.monthly_appreciation_rate
@@ -326,6 +329,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     parser.add_argument("--closing-costs", type=float, default=0.0, help="Total closing costs paid upfront in dollars.")
     parser.add_argument("--interest-rate", type=float, required=True, help="Annual mortgage interest rate as a percentage (e.g., 6.5).")
+    parser.add_argument("--points", type=float, default=0.0, help="Mortgage discount points purchased (each point equals 1% of loan amount).")
     parser.add_argument("--loan-term-years", type=int, default=30, help="Length of the mortgage in years.")
     parser.add_argument("--appreciation-rate", type=float, default=3.0, help="Expected annual appreciation rate (%).")
     parser.add_argument("--property-tax-rate", type=float, default=1.0, help="Annual property tax rate as a percentage of home value.")
@@ -347,6 +351,7 @@ def create_scenario(
     down_payment_amount: Optional[float] = None,
     down_payment_percent: Optional[float] = None,
     closing_costs: float,
+    points: float,
     interest_rate: float,
     loan_term_years: int,
     appreciation_rate: float,
@@ -376,7 +381,12 @@ def create_scenario(
     if closing_costs < 0:
         raise ValueError("Closing costs cannot be negative.")
 
+    if points < 0:
+        raise ValueError("Points cannot be negative.")
+
     annual_interest_rate = interest_rate / 100.0
+    rate_discount = points * 0.0025
+    effective_interest_rate = max(0.0, annual_interest_rate - rate_discount)
     annual_appreciation_rate = appreciation_rate / 100.0
     annual_property_tax_rate = property_tax_rate / 100.0
     annual_pmi_rate = pmi_rate / 100.0
@@ -390,12 +400,18 @@ def create_scenario(
     if loan_term_years <= 0:
         raise ValueError("Loan term years must be positive.")
 
+    loan_amount = max(0.0, purchase_price - down_payment_amount)
+    points_cost = loan_amount * (points / 100.0)
+
     return MortgageScenario(
         purchase_price=purchase_price,
         down_payment=down_payment_amount,
         closing_costs=closing_costs,
-        loan_term_years=loan_term_years,
+        points=points,
+        points_cost=points_cost,
         annual_interest_rate=annual_interest_rate,
+        effective_interest_rate=effective_interest_rate,
+        loan_term_years=loan_term_years,
         annual_appreciation_rate=annual_appreciation_rate,
         annual_property_tax_rate=annual_property_tax_rate,
         annual_pmi_rate=annual_pmi_rate,
@@ -414,6 +430,7 @@ def build_scenario(args: argparse.Namespace) -> MortgageScenario:
         down_payment_amount=args.down_payment_amount,
         down_payment_percent=args.down_payment_percent,
         closing_costs=args.closing_costs,
+        points=args.points,
         interest_rate=args.interest_rate,
         loan_term_years=args.loan_term_years,
         appreciation_rate=args.appreciation_rate,
@@ -440,9 +457,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     print(f"Purchase price:          {format_currency(scenario.purchase_price)}")
     print(f"Down payment:            {format_currency(scenario.down_payment)}")
     print(f"Closing costs:           {format_currency(scenario.closing_costs)}")
+    if scenario.points > 0:
+        print(f"Points purchased:        {scenario.points:.2f} (cost {format_currency(scenario.points_cost)})")
     print(f"Initial cash needed:     {format_currency(scenario.initial_cash_outlay)}")
     print(f"Loan amount:             {format_currency(scenario.loan_amount)}")
-    print(f"Interest rate (annual):  {scenario.annual_interest_rate * 100:.3f}%")
+    print(f"Interest rate (base):    {scenario.annual_interest_rate * 100:.3f}%")
+    print(f"Interest rate (effective): {scenario.effective_interest_rate * 100:.3f}%")
     print(f"Loan term (years):       {scenario.loan_term_years}")
     print(f"Appreciation rate:       {scenario.annual_appreciation_rate * 100:.3f}%")
     print(f"Property tax rate:       {scenario.annual_property_tax_rate * 100:.3f}%")

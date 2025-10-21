@@ -18,7 +18,6 @@ from house_equity_projection import (
     summarize_by_year,
 )
 
-
 def project_investment_balances(initial_capital, monthly_contributions, annual_return_percent):
     """Deterministic investment projection using constant average returns."""
     monthly_rate = (1.0 + annual_return_percent / 100.0) ** (1.0 / 12.0) - 1.0
@@ -126,6 +125,7 @@ def collect_inputs():
             step=0.5,
             format="%.2f",
         )
+        down_payment_value = purchase_price * (down_payment_percent / 100.0)
         down_payment_amount = None
     else:
         down_payment_amount = st.sidebar.number_input(
@@ -136,7 +136,27 @@ def collect_inputs():
             step=5_000.0,
             format="%.2f",
         )
+        down_payment_value = down_payment_amount
         down_payment_percent = None
+
+    estimated_loan_amount = max(0.0, purchase_price - down_payment_value)
+
+    points = st.sidebar.number_input(
+        "Discount points purchased",
+        min_value=0.0,
+        max_value=5.0,
+        value=0.0,
+        step=0.125,
+        format="%.3f",
+    )
+    if estimated_loan_amount > 0:
+        points_cost_est = estimated_loan_amount * (points / 100.0)
+    else:
+        points_cost_est = 0.0
+    st.sidebar.caption(
+        f"Points cost: {format_currency(points_cost_est)} "
+        f"(rate reduction {points * 0.25:.2f}%)"
+    )
 
     rent_initial = st.sidebar.number_input(
         "Monthly rent (initial $)",
@@ -239,6 +259,7 @@ def collect_inputs():
             down_payment_amount=down_payment_amount,
             down_payment_percent=down_payment_percent,
             closing_costs=closing_costs,
+            points=points,
             interest_rate=interest_rate,
             loan_term_years=loan_term_years,
             appreciation_rate=appreciation_rate,
@@ -302,7 +323,7 @@ def render_key_metrics(monthly_df: pd.DataFrame, scenario, investment_return: fl
     final_row = monthly_df.iloc[-1]
     monthly_pi = compute_monthly_payment(
         scenario.loan_amount,
-        scenario.annual_interest_rate,
+        scenario.effective_interest_rate,
         scenario.loan_term_months,
     )
 
@@ -323,7 +344,20 @@ def render_key_metrics(monthly_df: pd.DataFrame, scenario, investment_return: fl
         format_currency(investment_final),
     )
     rent_text = f" | Monthly rent (inflation-adjusted): {format_currency(final_rent)}" if final_rent is not None else ""
-    st.caption(f"Final home value: {format_currency(home_value_final)}{rent_text}")
+    rate_text = (
+        f"Base rate {scenario.annual_interest_rate * 100:.2f}% → "
+        f"Effective {scenario.effective_interest_rate * 100:.2f}%"
+    )
+    if scenario.points > 0:
+        rate_text += f" with {scenario.points:.2f} points ({format_currency(scenario.points_cost)})"
+    st.caption(
+        "\n".join(
+            [
+                f"Final home value: {format_currency(home_value_final)}{rent_text}",
+                rate_text,
+            ]
+        )
+    )
 
 
 def render_plot(monthly_df: pd.DataFrame) -> None:
