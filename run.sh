@@ -17,7 +17,7 @@ echo "Activating venv at ${VENV_DIR}..."
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 
-APP_PATH="${SCRIPT_DIR}/streamlit_app.py"
+APP_PATH="streamlit_app.py"
 if [[ ! -f "${APP_PATH}" ]]; then
   echo "Streamlit app not found at ${APP_PATH}" >&2
   exit 1
